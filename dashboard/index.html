@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — pre-token protocols ranked by implied value</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="mark" aria-hidden="true">◉</div>
+    <div>
+      <h1>TOKEN RADAR</h1>
+      <p class="tagline">Which protocol is worth farming next — and what to do about it.</p>
+    </div>
+  </div>
+  <div class="meta" id="meta"></div>
+</header>
+
+<nav class="tabs" id="tabs" aria-label="Lists">
+  <button data-tab="board" class="active">Ranked board</button>
+  <button data-tab="excluded">Set aside</button>
+  <button data-tab="launched">Already launched</button>
+</nav>
+
+<section class="controls" id="controls">
+  <label class="search">Search
+    <input id="q" type="search" placeholder="name or slug…" autocomplete="off">
+  </label>
+  <label>Chain
+    <select id="chain"><option value="">All chains</option></select>
+  </label>
+  <label>Category
+    <select id="category"><option value="">All categories</option></select>
+  </label>
+  <label>Sort by
+    <select id="sort">
+      <option value="value">Implied value</option>
+      <option value="tvl">TVL</option>
+      <option value="growth">7-day growth</option>
+      <option value="age">Time tracked</option>
+    </select>
+  </label>
+  <span class="count" id="count"></span>
+</section>
+
+<main>
+  <section id="detail" class="detail" hidden></section>
+  <section class="tablewrap">
+    <table id="board">
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </section>
+  <p class="hint" id="hint"></p>
+</main>
+
+<section class="method" id="method">
+  <h2>How the radar works</h2>
+  <p><strong>Implied value = TVL × category multiple × growth × age × chains.</strong>
+  The multiple is the median market-cap/TVL of the token-bearing protocols in the same
+  category (the global median when a category has fewer than three such comps), clamped to
+  0.08–1.50. Growth is 1 + half the 7-day TVL change, clamped to 0.75–1.50. Age is
+  1 + 0.15 per year tracked with no token recorded, up to 1.60. Chains add 0.02 per extra
+  chain, up to 1.10. Nothing here is a hardcoded list of names: every number comes from
+  the snapshot itself, and the board re-ranks from scratch on every run.</p>
+  <p><strong>What “pre-token” means.</strong> A protocol is on this board when DefiLlama
+  records no token for it — both its CoinGecko id and its symbol are null — and it is not
+  a wrapped, staked or bridged product of a token that already trades. That is the record,
+  not proof: a protocol on the list may still have a token its DefiLlama record does not
+  carry. The watchlist is the floor, never the ceiling: this board ranks every eligible
+  protocol below the $50M floor too, because the early ones are the point of a radar.</p>
+  <p><strong>What the number is.</strong> The implied value is this radar’s own claim about
+  what a launch would be worth if the protocol’s record stayed as it is. It does not
+  predict whether or when a token is issued. Farm plans give concrete steps with what they
+  cost and how long they take; do your own checks before you put money anywhere.</p>
+</section>
+
+<footer>
+  <p>Token Radar · snapshot <span id="asof"></span> · data: DefiLlama public API ·
+  implied values are the radar’s own claim, never a promise · built for make.fun token-radar-01</p>
+</footer>
+
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
