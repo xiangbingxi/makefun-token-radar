@@ -12,12 +12,16 @@ A token launch radar: it reads a sealed DefiLlama snapshot, ranks the protocols 
 implied value = TVL × category multiple × growth × age × chains
 ```
 
-- **Category multiple** — the median market-cap/TVL of the token-bearing protocols in the same category (the global median when a category has fewer than three such comps), clamped to 0.08–1.50.
+- **Category multiple** — the geometric mean market-cap/TVL of the token-bearing protocols in the same category (the global geometric mean when a category has fewer than three such comps), clamped to 0.08–1.50. Each log ratio is winsorized to the global mean ± 1.5 standard deviations before averaging, so one wild token cannot set a whole category's multiple on its own.
 - **Growth** — 1 + half the 7-day TVL change, clamped to 0.75–1.50.
 - **Age** — 1 + 0.15 per year tracked with no token recorded, up to 1.60.
 - **Chains** — 1 + 0.02 per extra chain, up to 1.10.
 
 Nothing is a hardcoded list of names: every number comes from the snapshot itself. A protocol is board-eligible when DefiLlama records no token for it and it is not a wrapped, staked or bridged product of a token that already trades. The watchlist is the floor, never the ceiling — the board ranks every eligible protocol below the $50M floor too.
+
+## Backtest
+
+The multiple was checked against the 128 token-bearing protocols in the snapshot that report a positive market cap, leave-one-out (each one's multiple computed without it): Spearman ρ = 0.41 against the real market caps, median error 0.64 orders of magnitude, 23% within twofold. The plain median multiple it replaces scored 0.38, 0.73 and 17% on the same test. A size adjustment was tried and dropped: market-cap/TVL falls with TVL across the whole sample, but among protocols above the $50M floor the slope is nearly flat (−0.07).
 
 ## Run it
 

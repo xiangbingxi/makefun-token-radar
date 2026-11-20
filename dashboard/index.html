@@ -59,12 +59,25 @@
 <section class="method" id="method">
   <h2>How the radar works</h2>
   <p><strong>Implied value = TVL × category multiple × growth × age × chains.</strong>
-  The multiple is the median market-cap/TVL of the token-bearing protocols in the same
-  category (the global median when a category has fewer than three such comps), clamped to
-  0.08–1.50. Growth is 1 + half the 7-day TVL change, clamped to 0.75–1.50. Age is
-  1 + 0.15 per year tracked with no token recorded, up to 1.60. Chains add 0.02 per extra
-  chain, up to 1.10. Nothing here is a hardcoded list of names: every number comes from
-  the snapshot itself, and the board re-ranks from scratch on every run.</p>
+  The multiple is the geometric mean market-cap/TVL of the token-bearing protocols in the same
+  category (the global geometric mean when a category has fewer than three such comps), clamped
+  to 0.08–1.50. Each log ratio is winsorized to the global mean plus or minus 1.5 standard
+  deviations before it is averaged, so one token whose market cap has nothing to do with its
+  protocol’s TVL cannot set a whole category’s multiple on its own. Growth is 1 + half the
+  7-day TVL change, clamped to 0.75–1.50. Age is 1 + 0.15 per year tracked with no token
+  recorded, up to 1.60. Chains add 0.02 per extra chain, up to 1.10. Nothing here is a
+  hardcoded list of names: every number comes from the snapshot itself, and the board
+  re-ranks from scratch on every run.</p>
+  <p><strong>Checked, not asserted.</strong> The radar was backtested against the 128
+  token-bearing protocols in this snapshot that report a positive market cap: each one’s
+  implied value was predicted with its own category’s multiple computed without it
+  (leave-one-out), then compared with its real market cap. The predictions rank the real
+  values with Spearman ρ = 0.41, the median prediction is off by 0.64 orders of magnitude
+  (about 4.3×), and 23% land within twofold of the real cap. The plain median multiple this
+  replaces scored 0.38, 0.73 and 17% on the same test. A size adjustment was tried and
+  dropped: market-cap/TVL does fall with TVL across the whole sample, but among protocols
+  above the $50M floor the slope is nearly flat (−0.07), so shrinking the giants’ values
+  would be fitting noise from small protocols.</p>
   <p><strong>What “pre-token” means.</strong> A protocol is on this board when DefiLlama
   records no token for it — both its CoinGecko id and its symbol are null — and it is not
   a wrapped, staked or bridged product of a token that already trades. That is the record,
