@@ -18,6 +18,17 @@
   <div class="meta" id="meta"></div>
 </header>
 
+<section class="kpi" id="kpi" aria-label="Coverage and checks">
+  <div class="kpi-item"><span class="kpi-num" id="kpiScanned">—</span><span class="kpi-label">protocols scanned</span></div>
+  <div class="kpi-item"><span class="kpi-num" id="kpiRanked">—</span><span class="kpi-label">ranked on the board</span></div>
+  <div class="kpi-item"><span class="kpi-num" id="kpiSetAside">—</span><span class="kpi-label">set aside</span></div>
+  <div class="kpi-item"><span class="kpi-num" id="kpiLaunched">—</span><span class="kpi-label">already launched</span></div>
+  <div class="kpi-item"><span class="kpi-num" id="kpiWatchlist">—</span><span class="kpi-label">watchlist covered</span></div>
+  <div class="kpi-item"><span class="kpi-num" id="kpiSpearman">—</span><span class="kpi-label">backtest spearman</span></div>
+  <div class="kpi-item"><span class="kpi-num" id="kpiError">—</span><span class="kpi-label">median error</span></div>
+  <div class="kpi-item"><span class="kpi-num" id="kpiWithin">—</span><span class="kpi-label">within twofold</span></div>
+</section>
+
 <nav class="tabs" id="tabs" aria-label="Lists">
   <button data-tab="board" class="active">Ranked board</button>
   <button data-tab="excluded">Set aside</button>
@@ -40,6 +51,8 @@
       <option value="tvl">TVL</option>
       <option value="growth">7-day growth</option>
       <option value="age">Time tracked</option>
+      <option value="odds">Token odds</option>
+      <option value="score">Farm score</option>
     </select>
   </label>
   <span class="count" id="count"></span>
@@ -58,32 +71,49 @@
 
 <section class="method" id="method">
   <h2>How the radar works</h2>
-  <p><strong>Implied value = TVL × category multiple × growth × age × chains.</strong>
-  The multiple is the geometric mean market-cap/TVL of the token-bearing protocols in the same
-  category (the global geometric mean when a category has fewer than three such comps), clamped
-  to 0.08–1.50. Each log ratio is winsorized to the global mean plus or minus 1.5 standard
-  deviations before it is averaged, so one token whose market cap has nothing to do with its
-  protocol’s TVL cannot set a whole category’s multiple on its own. Growth is 1 + half the
-  7-day TVL change, clamped to 0.75–1.50. Age is 1 + 0.15 per year tracked with no token
-  recorded, up to 1.60. Chains add 0.02 per extra chain, up to 1.10. Nothing here is a
-  hardcoded list of names: every number comes from the snapshot itself, and the board
-  re-ranks from scratch on every run.</p>
+  <p><strong>Implied value = TVL × category multiple × growth × age × chains × size.</strong>
+  The multiple is the category’s market-cap/TVL, fitted from the launched protocols in the
+  snapshot: each log ratio is winsorized to the global mean plus or minus 1.5 standard
+  deviations, averaged, then pulled toward the global mean with a weight of 5 — a category
+  with one comp borrows almost the whole global multiple, a category with twenty keeps
+  almost all of its own. The multiple is clamped to 0.08–1.50. Growth is 1 + a quarter of
+  the 7-day TVL change, clamped to 0.88–1.25. Age is 1 + 0.10 per year tracked with no token
+  recorded, up to 1.40. Chains add 0.02 per extra chain, up to 1.10. Size is
+  (TVL / $33.4M)^−0.1, tilted to the median launched protocol’s TVL: market-cap/TVL falls
+  as TVL grows, so the giants’ values are tilted down a little and the small ones up. Every
+  term is fitted to the snapshot’s own launched protocols — the weights are the ones that
+  tested best, not round numbers picked by hand — and nothing here is a hardcoded list of
+  names: the board re-ranks from scratch on every run.</p>
+  <p><strong>Token odds.</strong> Each row carries the chance a protocol like it ever records
+  a token, from the peers’ record: the share of protocols in its category that already
+  record one, shrunk toward the snapshot-wide 54.9% with a weight of 10, so a category of
+  one does not claim 0% or 100%. Lending sits near 76%, Risk Curators near 21%. The odds
+  describe the category’s record; they do not predict any one protocol.</p>
   <p><strong>Checked, not asserted.</strong> The radar was backtested against the 128
-  token-bearing protocols in this snapshot that report a positive market cap: each one’s
-  implied value was predicted with its own category’s multiple computed without it
-  (leave-one-out), then compared with its real market cap. The predictions rank the real
-  values with Spearman ρ = 0.41, the median prediction is off by 0.64 orders of magnitude
-  (about 4.3×), and 23% land within twofold of the real cap. The plain median multiple this
-  replaces scored 0.38, 0.73 and 17% on the same test. A size adjustment was tried and
-  dropped: market-cap/TVL does fall with TVL across the whole sample, but among protocols
-  above the $50M floor the slope is nearly flat (−0.07), so shrinking the giants’ values
-  would be fitting noise from small protocols.</p>
+  token-bearing protocols in this snapshot that report a positive market cap, and the
+  numbers on this page are computed by the program on every run, not typed in. Leave-one-out
+  (each protocol predicted with a model fitted without it): the predictions rank the real
+  market caps with Spearman ρ = 0.41, the median prediction is off by 4.2×, and 26% land
+  within twofold of the real cap. Held out twice (the 128 split in two by slug order, each
+  half predicted from a model fitted on the other): ρ = 0.41, 4.6×, 27% one way and
+  ρ = 0.38, 4.1×, 25% the other. The plain median multiple this replaces scores 0.37,
+  5.2× and 20% on the same leave-one-out test.</p>
+  <p><strong>Farm plans, costed.</strong> Each plan is about 10 transactions across 8 to 12
+  weeks, so the total gas cost is the chain’s per-transaction gas times 10, and the deposits
+  are shown apart — they come back when the position closes, the gas does not. The farm
+  score is implied value × token odds per dollar of gas spent. The verdict follows the
+  score: 10,000,000 and up “Farm first”, 1,000,000 and up “Farm”, 100,000 and up
+  “Farm small”, below that “Watch”. The cutoffs are the radar’s own rule, stated here; the
+  score is what ranks the verdicts.</p>
   <p><strong>What “pre-token” means.</strong> A protocol is on this board when DefiLlama
   records no token for it — both its CoinGecko id and its symbol are null — and it is not
   a wrapped, staked or bridged product of a token that already trades. That is the record,
   not proof: a protocol on the list may still have a token its DefiLlama record does not
   carry. The watchlist is the floor, never the ceiling: this board ranks every eligible
-  protocol below the $50M floor too, because the early ones are the point of a radar.</p>
+  protocol below the $50M floor too, because the early ones are the point of a radar. The
+  three lists on this page account for all 758 protocols in the snapshot: 198 ranked,
+  144 set aside with the reason each was dropped, 416 already launched and shown as
+  reference.</p>
   <p><strong>What the number is.</strong> The implied value is this radar’s own claim about
   what a launch would be worth if the protocol’s record stayed as it is. It does not
   predict whether or when a token is issued. Farm plans give concrete steps with what they

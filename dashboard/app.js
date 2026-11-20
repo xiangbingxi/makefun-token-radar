@@ -3,22 +3,29 @@
  * Data comes from data.js (window.TOKEN_RADAR), written by main.ts from the
  * same sealed snapshot as board.json: `rows` is the ranked board (pre-token
  * protocols, eligible), `excluded` the pre-token protocols the exclusion rule
- * set aside, `launched` the token-bearing protocols shown only as reference.
+ * set aside, `launched` every token-bearing protocol, shown only as
+ * reference. The three lists together account for all 758 protocols in the
+ * snapshot: 198 ranked, 144 set aside, 416 launched.
  *
  * The value model, stated here so a reader can check it against the numbers
- * on the page: implied = TVL x category multiple x growth x age x chains.
- * The multiple is the winsorized geometric mean market-cap/TVL of the
- * token-bearing protocols in the same category (the global geometric mean
- * when a category has fewer than three such comps), clamped to 0.08-1.50.
- * Each log ratio is winsorized to the global mean plus or minus 1.5
- * standard deviations before it is averaged. Growth is 1 + half the
- * 7-day TVL change. Age is 1 + 0.15 per year tracked with no token recorded,
- * up to 1.60. Chains add 0.02 per extra chain, up to 1.10. Every factor is
- * stored on the row, so the detail view can show the arithmetic instead of
- * asserting it. The multiple was backtested leave-one-out against the 128
- * launched protocols that report a positive market cap (Spearman 0.41,
- * median error 0.64 orders of magnitude, 23% within twofold), against
- * 0.38 / 0.73 / 17% for the plain median multiple it replaces.
+ * on the page: implied = TVL x category multiple x growth x age x chains x
+ * size. The multiple is the shrinkage-weighted winsorized geometric mean
+ * market-cap/TVL of the token-bearing protocols in the same category (weight
+ * 5 toward the global mean), clamped to 0.08-1.50. Growth is 1 + a quarter of
+ * the 7-day TVL change. Age is 1 + 0.10 per year tracked with no token
+ * recorded, up to 1.40. Chains add 0.02 per extra chain, up to 1.10. Size is
+ * (TVL / $33.4M)^-0.1, tilted to the median launched protocol's TVL. Every
+ * factor is stored on the row, so the detail view can show the arithmetic
+ * instead of asserting it. Token odds are the shrunk share of the row's
+ * category that already records a token (weight 10 toward the snapshot-wide
+ * 54.9%). The farm score is implied value x token odds per dollar of gas
+ * spent (about 10 transactions over 8 to 12 weeks); the verdict follows the
+ * score: 10M and up Farm first, 1M and up Farm, 100K and up Farm small, below
+ * that Watch. The backtest numbers in the strip above the board are computed
+ * by main.ts on every run: leave-one-out over the 128 launched protocols
+ * that report a positive market cap (Spearman 0.41, median error 4.2x, 26%
+ * within twofold), and held out twice (0.41 / 4.6x / 27% and 0.38 / 4.1x /
+ * 25%), against 0.37 / 5.2x / 20% for the plain median multiple.
  *
  * Deep links: #/detail/<slug> opens a protocol, #/filter/chain/<chain> and
  * #/filter/category/<category> open the board pre-filtered, #/tab/<board |
@@ -29,7 +36,7 @@
   var DATA = window.TOKEN_RADAR;
   if (!DATA) {
     document.getElementById('tbody').innerHTML =
-      '<tr><td class="empty" colspan="9">No data loaded.</td></tr>';
+      '<tr><td class="empty" colspan="11">No data loaded.</td></tr>';
     return;
   }
   var ROWS = DATA.rows;
@@ -44,6 +51,7 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function money(n) {
+    if (n === null || n === undefined) return '<span class="cat">—</span>';
     if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
     if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
     if (n >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
@@ -58,14 +66,33 @@
     if (v === null || v === undefined) return '<span class="cat">—</span>';
     return v.toFixed(1) + 'y';
   }
+  function verdictClass(v) {
+    if (v === 'Farm first') return 'v-first';
+    if (v === 'Farm') return 'v-farm';
+    if (v === 'Farm small') return 'v-small';
+    return 'v-watch';
+  }
 
   /* ---- header ---- */
   $('meta').innerHTML =
     'Snapshot <b>' + esc(META.as_of) + '</b> · ' +
     '<b>' + META.protocols_scanned + '</b> protocols scanned · ' +
     '<b>' + META.watchlist + '</b> on the watchlist · ' +
-    '<b>' + META.board_rows + '</b> ranked';
+    '<b>' + META.board_rows + '</b> ranked · ' +
+    '<b>' + META.set_aside + '</b> set aside · ' +
+    '<b>' + META.launched_shown + '</b> launched';
   $('asof').textContent = META.as_of;
+
+  /* ---- KPI strip: coverage and the backtest, from the run's own numbers ---- */
+  var loo = META.backtest.leave_one_out;
+  $('kpiScanned').textContent = META.protocols_scanned;
+  $('kpiRanked').textContent = META.board_rows;
+  $('kpiSetAside').textContent = META.set_aside;
+  $('kpiLaunched').textContent = META.launched_shown;
+  $('kpiWatchlist').textContent = META.watchlist + '/' + META.watchlist;
+  $('kpiSpearman').textContent = loo.spearman.toFixed(2);
+  $('kpiError').textContent = loo.median_error_x.toFixed(1) + '×';
+  $('kpiWithin').textContent = Math.round(loo.within_twofold_pct) + '%';
 
   /* ---- filter options ---- */
   var chains = {};
@@ -117,6 +144,8 @@
       tvl: function (a, b) { return b.tvl_usd - a.tvl_usd; },
       growth: function (a, b) { return (b.change_7d === null ? -1e9 : b.change_7d) - (a.change_7d === null ? -1e9 : a.change_7d); },
       age: function (a, b) { return (b.age_years === null ? -1 : b.age_years) - (a.age_years === null ? -1 : a.age_years); },
+      odds: function (a, b) { return b.token_odds - a.token_odds; },
+      score: function (a, b) { return b.farm_score - a.farm_score; },
     }[state.sort];
     return list.slice().sort(by);
   }
@@ -126,7 +155,8 @@
     if (tab === 'board') {
       return '<tr><th>#</th><th>Protocol</th><th>Category</th><th>Chains</th>' +
         '<th class="num">TVL</th><th class="num">7d</th><th class="num">Age</th>' +
-        '<th class="num">Implied value</th><th></th></tr>';
+        '<th class="num">Token odds</th><th class="num">Implied value</th>' +
+        '<th>Farm verdict</th><th></th></tr>';
     }
     if (tab === 'excluded') {
       return '<tr><th>Protocol</th><th>Category</th>' +
@@ -147,7 +177,9 @@
       '<td class="num">' + money(r.tvl_usd) + '</td>' +
       '<td class="num">' + pct(r.change_7d) + '</td>' +
       '<td class="num">' + age(r.age_years) + '</td>' +
+      '<td class="num">' + Math.round(r.token_odds * 100) + '%</td>' +
       '<td class="num"><b>' + money(r.implied_value_usd) + '</b></td>' +
+      '<td><span class="verdict ' + verdictClass(r.farm_verdict) + '">' + esc(r.farm_verdict) + '</span></td>' +
       '<td><button class="farmbtn" data-farm="' + esc(r.slug) + '">Farm plan</button></td></tr>';
   }
 
@@ -163,7 +195,7 @@
       '<td class="cat">' + esc(l.category || '—') + '</td>' +
       '<td class="num">' + money(l.mcap_usd) + '</td>' +
       '<td class="num">' + money(l.tvl_usd) + '</td>' +
-      '<td class="num">' + l.ratio.toFixed(2) + 'x</td></tr>';
+      '<td class="num">' + (l.ratio === null ? '<span class="cat">—</span>' : l.ratio.toFixed(2) + 'x') + '</td></tr>';
   }
 
   function render() {
@@ -174,9 +206,9 @@
       var list = visibleRows();
       body.innerHTML = list.length
         ? list.map(rowHtml).join('')
-        : '<tr><td class="empty" colspan="9">Nothing matches these filters.</td></tr>';
+        : '<tr><td class="empty" colspan="11">Nothing matches these filters.</td></tr>';
       $('count').textContent = list.length + ' of ' + ROWS.length + ' protocols';
-      hint = 'Click a row for the detail view: the value math and the farm plan. ' +
+      hint = 'Click a row for the detail view: the value math, the token odds and the costed farm plan. ' +
         'Ranks are by implied value; sorting re-orders the table without changing ranks.';
     } else if (state.tab === 'excluded') {
       body.innerHTML = EXCLUDED.map(excludedHtml).join('');
@@ -186,9 +218,10 @@
         'The biggest ones by TVL are exchanges and bridges — that is why a TVL table alone misleads.';
     } else {
       body.innerHTML = LAUNCHED.map(launchedHtml).join('');
-      $('count').textContent = LAUNCHED.length + ' largest launched protocols';
+      $('count').textContent = LAUNCHED.length + ' launched protocols — every one accounted for';
       hint = 'Reference only: these already trade, so they are not on the board. Their ' +
-        'market-cap/TVL ratios are where the board’s category multiples come from.';
+        'market-cap/TVL ratios are where the board’s category multiples come from. Rows with no ' +
+        'market cap record a token but report none.';
     }
     $('hint').textContent = hint;
     renderDetail();
@@ -209,7 +242,8 @@
     box.innerHTML =
       '<button class="close" id="detailClose">Close</button>' +
       '<h2>' + esc(r.name) + ' <span class="slug">' + esc(r.slug) + '</span>' +
-      (r.watchlist ? '<span class="badge">WATCHLIST</span>' : '') + '</h2>' +
+      (r.watchlist ? '<span class="badge">WATCHLIST</span>' : '') +
+      '<span class="verdict ' + verdictClass(r.farm_verdict) + '">' + esc(r.farm_verdict) + '</span></h2>' +
       '<p class="thesis">' + esc(r.thesis) + '</p>' +
       '<h3>Implied value — the math</h3>' +
       '<div class="math">' +
@@ -217,10 +251,23 @@
       '<span class="pill">multiple <b>' + r.multiple.toFixed(2) + 'x</b></span><span class="eq">×</span>' +
       '<span class="pill">growth <b>' + r.growth_factor.toFixed(2) + 'x</b></span><span class="eq">×</span>' +
       '<span class="pill">age <b>' + r.age_factor.toFixed(2) + 'x</b></span><span class="eq">×</span>' +
-      '<span class="pill">chains <b>' + r.chain_factor.toFixed(2) + 'x</b></span><span class="eq">=</span>' +
+      '<span class="pill">chains <b>' + r.chain_factor.toFixed(2) + 'x</b></span><span class="eq">×</span>' +
+      '<span class="pill">size <b>' + r.size_factor.toFixed(2) + 'x</b></span><span class="eq">=</span>' +
       '<span class="pill">implied <b>' + money(r.implied_value_usd) + '</b></span>' +
       '</div>' +
-      '<h3>Farm plan — what to do</h3>' +
+      '<h3>Token odds — from the peers’ record</h3>' +
+      '<p class="odds-line">Protocols in <b>' + esc(r.category || 'this category') + '</b> have recorded a token ' +
+      '<b>' + Math.round(r.token_odds * 100) + '%</b> of the time (shrunk toward the snapshot-wide ' +
+      Math.round(META.global_launch_rate * 100) + '%). That is the category’s record, not a promise about ' +
+      esc(r.name) + '.</p>' +
+      '<h3>Farm plan — what to do, and what it costs</h3>' +
+      '<div class="farm-cost">' +
+      '<span>Gas, about 10 transactions <b>$' + r.farm_gas_usd.toFixed(2) + '</b></span>' +
+      '<span>Deposits, recoverable <b>$' + r.farm_deposit_usd.toLocaleString('en-US') + '</b></span>' +
+      '<span>Time <b>' + esc(r.farm_weeks) + ' weeks</b></span>' +
+      '<span>Farm score <b>' + r.farm_score.toLocaleString('en-US') + '</b></span>' +
+      '<span>Verdict <b>' + esc(r.farm_verdict) + '</b></span>' +
+      '</div>' +
       '<ol class="steps">' + steps + '</ol>' +
       '<h3>Facts</h3>' +
       '<div class="facts">' +

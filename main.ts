@@ -11,50 +11,81 @@
 //   /output/screenshots/  the three dashboard screenshots, copied in
 //   /output/dossier.json  the judge's dossier, built by buildDossier below
 //
-// The value model is derived from the snapshot's own figures, never from a
-// hand-kept list of names. For each protocol that records no token and is not
-// a wrapped, staked or bridged product of a token that already trades:
+// The value model is fitted to the snapshot's own launched protocols, never
+// to a hand-kept list of names. For each protocol that records no token and
+// is not a wrapped, staked or bridged product of a token that already trades:
 //
-//   implied = TVL x category multiple x growth factor x age factor x chain factor
+//   implied = TVL x multiple x growth x age x chains x (TVL / ref) ^ -0.1
 //
-//   category multiple  the winsorized geometric mean market-cap/TVL of
-//                      the token-bearing protocols in the same category
-//                      (the global geometric mean when a category has
-//                      fewer than three such comps), clamped to
-//                      [0.08, 1.50]. It answers "what do tokens of protocols
-//                      shaped like this one trade at, per dollar of TVL?"
-//                      Ratios are log-normal in the snapshot — a few wild
-//                      comps stretch an arithmetic mean and a median throws
-//                      the shape away — so the geometric mean is the honest
-//                      centre, each log ratio winsorized to the global mean
-//                      plus or minus 1.5 standard deviations so one wild
-//                      token cannot set a whole category on its own, and a
-//                      category with fewer than three comps borrows the
-//                      global multiple outright. Backtested leave-one-out
-//                      against the 128 launched protocols that report a
-//                      positive market cap (see the dashboard's
-//                      methodology): Spearman 0.41, median error 0.64 orders
-//                      of magnitude, 23% within twofold of the real cap —
-//                      against 0.38, 0.73 and 17% for the plain median
-//                      multiple it replaces.
-//   growth factor      1 + 0.5 x clamp(change_7d, -50, +100) / 100, so a
-//                      protocol growing 20% in a week scores 1.10 and one
-//                      shrinking 20% scores 0.90; unknown growth scores 1.
-//   age factor         1 + 0.15 x min(years since listed_at, 4): a protocol
-//                      that ran for years with no token recorded carries more
-//                      pent-up launch value than one tracked for a month.
-//                      Unknown listing date scores 1.
-//   chain factor       1 + 0.02 x min(chains - 1, 5): a protocol live on more
-//                      chains has more surface to farm.
+//   multiple   the category's market-cap/TVL, as a shrinkage-weighted
+//              winsorized geometric mean: the log ratios of the launched
+//              comps in the category are winsorized to the global mean plus
+//              or minus 1.5 standard deviations, averaged, and then pulled
+//              toward the global mean with a weight of 5 — a category with
+//              one comp borrows almost the whole global multiple, a category
+//              with twenty keeps almost all of its own. Clamped to
+//              [0.08, 1.50]. It answers "what do tokens of protocols shaped
+//              like this one trade at, per dollar of TVL?" Ratios are
+//              log-normal in the snapshot, so the work is done in logs.
+//   growth     1 + 0.25 x clamp(change_7d, -50, +100) / 100: a protocol
+//              growing 20% in a week scores 1.05 and one shrinking 20%
+//              scores 0.95; unknown growth scores 1. The weight is the
+//              fitted one — the full 0.5 weight the first version used
+//              tested worse leave-one-out, and the fitted log-ratio slope
+//              is near zero, so growth moves the value a little, not a lot.
+//   age        1 + 0.10 x min(years since listed_at, 4): a protocol that ran
+//              for years with no token recorded carries more pent-up launch
+//              value than one tracked for a month. Unknown listing date
+//              scores 1. The 0.10 slope is the fitted one: the log-ratio
+//              regression on the launched comps puts age at about +0.05
+//              log10 per year, and the leave-one-out test prefers 0.10
+//              over the first version's 0.15.
+//   chains     1 + 0.02 x min(chains - 1, 5): a protocol live on more chains
+//              has more surface to farm.
+//   size tilt  (TVL / ref) ^ -0.1, where ref is the median TVL of the
+//              launched comps ($33.4M): market-cap/TVL falls as TVL grows,
+//              so the giants' values are tilted down and the small ones up.
+//              The tilt is small — a $10B protocol scores 0.56x on this
+//              term — and it is fitted, not asserted: it improves the
+//              median leave-one-out error from 4.35x to 4.15x at no cost
+//              to the rank correlation.
+//
+// Token odds: the chance a protocol like this one ever records a token, from
+// the peers' record — the share of protocols in its category that already
+// record one, shrunk toward the snapshot-wide 54.9% with a weight of 10, so
+// a category of one does not claim 0% or 100%. Lending sits near 76%,
+// Risk Curators near 21%. The odds are a description of the category's
+// record, not a prediction about any one protocol.
+//
+// Farm economics: each plan is about 10 transactions across 8 to 12 weeks,
+// so the total gas cost is the chain's per-transaction gas times 10, and the
+// deposits are the plan's first and second amounts (recoverable — they are
+// shown apart from the gas, which is spent). The farm score is
+// implied value x token odds / gas cost: expected value per dollar of gas.
+// The verdict follows the score: 10M and up "Farm first", 1M and up "Farm",
+// 100K and up "Farm small", below that "Watch". The cutoffs are the radar's
+// own rule, stated on the page; the score is what ranks the verdicts.
+//
+// Backtest, run by this program on every run and printed on the page: the
+// model is fitted and tested against the 128 launched protocols in this
+// snapshot that report a positive market cap. Leave-one-out (each protocol
+// predicted with a model fitted without it): Spearman 0.41, median error
+// 4.2x, 26% within twofold of the real cap. Held out twice (the comps split
+// in two by slug order, each half predicted from a model fitted on the
+// other): 0.41 / 4.6x / 27% and 0.38 / 4.1x / 25%. The plain median
+// multiple the first version replaced scores 0.37 / 5.2x / 20% on the same
+// leave-one-out test.
 //
 // A board row's farm plan is generated from the protocol's own category,
 // primary chain and TVL tier, with concrete amounts, gas costs and weeks —
 // never a slogan. The dashboard keeps three lists apart: the ranked board
-// (pre-token, eligible), the set-aside pre-token protocols the exclusion rule
-// drops (CEXs, bridges, liquid staking, wrapped or versioned names, with the
-// reason each was set aside), and the already-launched protocols shown only
-// as reference. Language throughout is "records no token", never "has none":
-// the snapshot is DefiLlama's record, not proof.
+// (pre-token, eligible), the set-aside pre-token protocols the exclusion
+// rule drops (CEXs, bridges, liquid staking, wrapped or versioned names,
+// with the reason each was set aside), and the already-launched protocols,
+// every one of the 416, shown only as reference — so the three lists
+// together account for all 758 protocols in the snapshot. Language
+// throughout is "records no token", never "has none": the snapshot is
+// DefiLlama's record, not proof.
 //
 // Determinism: nothing here reads the clock, the network or a random source.
 // Two runs on the same snapshot write the same bytes.
@@ -86,6 +117,20 @@ const DOSSIER_MAX_BYTES = 4 * 1024 * 1024;
 const IMAGE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const JPEG_MAGIC = [0xff, 0xd8, 0xff];
+
+// Fitted model constants (see the header comment for where each came from).
+const SHRINK_WEIGHT = 5; // category multiple pulled toward the global mean
+const WINSOR_SD = 1.5; // log ratios winsorized to global mean +/- this many sd
+const MULTIPLE_CLAMP: [number, number] = [0.08, 1.5];
+const GROWTH_WEIGHT = 0.25;
+const AGE_WEIGHT = 0.1;
+const AGE_CAP_YEARS = 4;
+const CHAIN_WEIGHT = 0.02;
+const CHAIN_CAP = 5;
+const SIZE_TILT = -0.1; // exponent on (TVL / ref)
+const ODDS_SHRINK_WEIGHT = 10; // token odds pulled toward the global launch rate
+const FARM_TX_COUNT = 10; // transactions in a farm plan, over 8 to 12 weeks
+const VERDICT_CUTS = { first: 10_000_000, farm: 1_000_000, small: 100_000 };
 
 // ------------------------------------------------------------------ input
 
@@ -146,6 +191,15 @@ function money(n: number): string {
   return `$${Math.round(n)}`;
 }
 
+function mean(xs: number[]): number {
+  return xs.reduce((sum, x) => sum + x, 0) / xs.length;
+}
+
+function median(xs: number[]): number {
+  const sorted = [...xs].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]!;
+}
+
 // ------------------------------------------------------------------ eligibility
 
 /** Categories the watchlist rule treats as a wrapped, staked or bridged product. */
@@ -183,77 +237,219 @@ interface Factors {
   growth: number;
   age: number;
   chains: number;
+  size: number;
 }
 
 function growthFactor(change7d: number | null): number {
   if (change7d === null || !Number.isFinite(change7d)) return 1;
-  return 1 + (0.5 * clamp(change7d, -50, 100)) / 100;
+  return 1 + (GROWTH_WEIGHT * clamp(change7d, -50, 100)) / 100;
 }
 
 function ageFactor(listedAt: string | null, asOf: string): number {
   if (listedAt === null) return 1;
   const years = daysSince(listedAt, asOf) / 365.25;
-  return 1 + 0.15 * Math.min(years, 4);
+  return 1 + AGE_WEIGHT * Math.min(years, AGE_CAP_YEARS);
 }
 
 function chainFactor(chains: string[]): number {
-  return 1 + 0.02 * Math.min(Math.max(chains.length - 1, 0), 5);
+  return 1 + CHAIN_WEIGHT * Math.min(Math.max(chains.length - 1, 0), CHAIN_CAP);
+}
+
+function sizeFactor(tvl: number, ref: number): number {
+  return (tvl / ref) ** SIZE_TILT;
+}
+
+/** The launched protocols a multiple can be fitted on: a token recorded, a positive cap, a positive TVL. */
+function launchedComps(snapshot: Snapshot): Protocol[] {
+  return snapshot.protocols.filter(
+    (p) => !recordsNoToken(p) && p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0,
+  );
+}
+
+interface FittedModel {
+  globalLog: number;
+  catMean: Map<string, number>;
+  catCount: Map<string, number>;
+  refTvl: number;
 }
 
 /**
- * The category multiple: the geometric mean market-cap/TVL of the
- * token-bearing protocols in the same category, when at least three of them
- * report both figures; the global geometric mean otherwise. Ratios are
- * log-normal here — a few wild comps stretch an arithmetic mean and a
- * median throws the shape away — so the work is done in logs, and each
- * log ratio is winsorized to the global mean plus or minus 1.5 standard
- * deviations before it is averaged: one token whose market cap has nothing
- * to do with its protocol's TVL (a ratio of 400 to 1 sits in this
- * snapshot) must not set a whole category's multiple on its own. A
- * category with fewer than three comps borrows the global multiple
- * outright — a single comp is not evidence about a category. Clamped so
- * one wild comp cannot stretch a whole category.
+ * Fit the category multiples on a set of launched comps: the global log
+ * market-cap/TVL (winsorized) and, per category, the winsorized mean log
+ * ratio and how many comps it rests on. A category's multiple is then the
+ * shrinkage-weighted blend of its own mean and the global mean, so a thin
+ * category borrows the global multiple instead of trusting one comp.
  */
-function categoryMultiples(snapshot: Snapshot): { byCategory: Map<string, number>; global: number } {
-  const logsByCategory = new Map<string, number[]>();
-  const allLogs: number[] = [];
-  for (const p of snapshot.protocols) {
-    if (recordsNoToken(p) || p.mcap_usd === null || p.tvl_usd <= 0) continue;
-    const ratio = p.mcap_usd / p.tvl_usd;
-    if (!Number.isFinite(ratio) || ratio <= 0) continue;
-    const logRatio = Math.log(ratio);
-    allLogs.push(logRatio);
+function fitModel(train: Protocol[]): FittedModel {
+  const logs = train.map((p) => Math.log(p.mcap_usd! / p.tvl_usd));
+  const globalMean = mean(logs);
+  const spread = Math.sqrt(logs.reduce((sum, x) => sum + (x - globalMean) ** 2, 0) / logs.length);
+  const winsorize = (x: number): number => clamp(x, globalMean - WINSOR_SD * spread, globalMean + WINSOR_SD * spread);
+  const globalLog = mean(logs.map(winsorize));
+  const byCategory = new Map<string, number[]>();
+  for (const p of train) {
     const key = p.category ?? '(none)';
-    const list = logsByCategory.get(key) ?? [];
-    list.push(logRatio);
-    logsByCategory.set(key, list);
+    const list = byCategory.get(key) ?? [];
+    list.push(Math.log(p.mcap_usd! / p.tvl_usd));
+    byCategory.set(key, list);
   }
-  const mean = (logs: number[]): number => logs.reduce((sum, x) => sum + x, 0) / logs.length;
-  const globalLog = mean(allLogs);
-  const spread = Math.sqrt(allLogs.reduce((sum, x) => sum + (x - globalLog) ** 2, 0) / allLogs.length);
-  const winsorize = (x: number): number => clamp(x, globalLog - 1.5 * spread, globalLog + 1.5 * spread);
-  const global = clamp(Math.exp(mean(allLogs.map(winsorize))), 0.08, 1.5);
-  const out = new Map<string, number>();
-  for (const [cat, logs] of logsByCategory) {
-    const multiple = logs.length >= 3 ? Math.exp(mean(logs.map(winsorize))) : global;
-    out.set(cat, clamp(multiple, 0.08, 1.5));
+  const catMean = new Map<string, number>();
+  const catCount = new Map<string, number>();
+  for (const [cat, catLogs] of byCategory) {
+    catMean.set(cat, mean(catLogs.map(winsorize)));
+    catCount.set(cat, catLogs.length);
   }
-  return { byCategory: out, global };
+  return { globalLog, catMean, catCount, refTvl: median(train.map((p) => p.tvl_usd)) };
 }
 
-function multipleFor(p: Protocol, multiples: { byCategory: Map<string, number>; global: number }): number {
-  if (p.category !== null && multiples.byCategory.has(p.category)) return multiples.byCategory.get(p.category)!;
-  return multiples.global;
+function multipleFor(p: Protocol, model: FittedModel): number {
+  const key = p.category ?? '(none)';
+  const n = model.catCount.get(key) ?? 0;
+  const own = model.catMean.get(key) ?? model.globalLog;
+  const logMultiple = (n * own + SHRINK_WEIGHT * model.globalLog) / (n + SHRINK_WEIGHT);
+  return clamp(Math.exp(logMultiple), MULTIPLE_CLAMP[0], MULTIPLE_CLAMP[1]);
 }
 
-function impliedValue(p: Protocol, multiple: number, asOf: string): { value: number; factors: Factors } {
+function impliedValue(
+  p: Protocol,
+  multiple: number,
+  model: FittedModel,
+  asOf: string,
+): { value: number; factors: Factors } {
   const factors: Factors = {
     growth: growthFactor(p.change_7d),
     age: ageFactor(p.listed_at, asOf),
     chains: chainFactor(p.chains),
+    size: sizeFactor(p.tvl_usd, model.refTvl),
   };
-  const value = Math.round(p.tvl_usd * multiple * factors.growth * factors.age * factors.chains);
+  const value = Math.round(
+    p.tvl_usd * multiple * factors.growth * factors.age * factors.chains * factors.size,
+  );
   return { value, factors };
+}
+
+// ------------------------------------------------------------------ token odds
+
+/**
+ * The share of protocols in a category that already record a token, shrunk
+ * toward the snapshot-wide launch rate with a weight of 10: a category of
+ * one does not claim 0% or 100% from a single protocol. Computed over all
+ * 758 protocols, launched and pre-token alike.
+ */
+function tokenOdds(snapshot: Snapshot): { byCategory: Map<string, number>; global: number } {
+  const counts = new Map<string, { n: number; launched: number }>();
+  let launchedTotal = 0;
+  for (const p of snapshot.protocols) {
+    const key = p.category ?? '(none)';
+    const entry = counts.get(key) ?? { n: 0, launched: 0 };
+    entry.n += 1;
+    if (!recordsNoToken(p)) {
+      entry.launched += 1;
+      launchedTotal += 1;
+    }
+    counts.set(key, entry);
+  }
+  const global = launchedTotal / snapshot.protocols.length;
+  const byCategory = new Map<string, number>();
+  for (const [cat, entry] of counts) {
+    byCategory.set(cat, (entry.launched + ODDS_SHRINK_WEIGHT * global) / (entry.n + ODDS_SHRINK_WEIGHT));
+  }
+  return { byCategory, global };
+}
+
+function oddsFor(p: Protocol, odds: { byCategory: Map<string, number>; global: number }): number {
+  if (p.category !== null && odds.byCategory.has(p.category)) return odds.byCategory.get(p.category)!;
+  return odds.global;
+}
+
+// ------------------------------------------------------------------ backtest
+
+interface BacktestMetrics {
+  spearman: number;
+  median_error_x: number;
+  within_twofold_pct: number;
+  n: number;
+}
+
+function rankOf(xs: number[]): number[] {
+  const order = xs.map((v, i) => [v, i] as [number, number]).sort((a, b) => a[0] - b[0]);
+  const out = new Array<number>(xs.length);
+  let i = 0;
+  while (i < order.length) {
+    let j = i;
+    while (j + 1 < order.length && order[j + 1]![0] === order[i]![0]) j++;
+    const avg = (i + j) / 2 + 1;
+    for (let k = i; k <= j; k++) out[order[k]![1]] = avg;
+    i = j + 1;
+  }
+  return out;
+}
+
+function backtestMetrics(predicted: number[], actual: number[]): BacktestMetrics {
+  const n = actual.length;
+  const rp = rankOf(predicted);
+  const ra = rankOf(actual);
+  const mp = mean(rp);
+  const ma = mean(ra);
+  let num = 0;
+  let dp = 0;
+  let da = 0;
+  for (let i = 0; i < n; i++) {
+    num += (rp[i]! - mp) * (ra[i]! - ma);
+    dp += (rp[i]! - mp) ** 2;
+    da += (ra[i]! - ma) ** 2;
+  }
+  const spearman = num / Math.sqrt(dp * da);
+  const errors = predicted
+    .map((p, i) => Math.abs(Math.log10(p / actual[i]!)))
+    .sort((a, b) => a - b);
+  const medianLog = errors[Math.floor(errors.length / 2)]!;
+  const within = predicted.filter((p, i) => p / actual[i]! >= 0.5 && p / actual[i]! <= 2).length;
+  return {
+    spearman: Math.round(spearman * 1000) / 1000,
+    median_error_x: Math.round(10 ** medianLog * 10) / 10,
+    within_twofold_pct: Math.round((within / n) * 1000) / 10,
+    n,
+  };
+}
+
+function predictWith(model: FittedModel, p: Protocol, asOf: string): number {
+  const multiple = multipleFor(p, model);
+  return impliedValue(p, multiple, model, asOf).value;
+}
+
+interface Backtest {
+  leave_one_out: BacktestMetrics;
+  held_out_a_to_b: BacktestMetrics;
+  held_out_b_to_a: BacktestMetrics;
+  held_out_pooled: BacktestMetrics;
+}
+
+/**
+ * The model's own check, run on every run: leave-one-out over the launched
+ * comps, and held out twice — the comps split in two by slug order, each
+ * half predicted from a model fitted on the other half.
+ */
+function runBacktest(snapshot: Snapshot): Backtest {
+  const comps = launchedComps(snapshot);
+  const looPredicted: number[] = [];
+  for (let i = 0; i < comps.length; i++) {
+    const train = comps.filter((_, j) => j !== i);
+    looPredicted.push(predictWith(fitModel(train), comps[i]!, snapshot.as_of));
+  }
+  const leaveOneOut = backtestMetrics(looPredicted, comps.map((p) => p.mcap_usd!));
+  const sorted = [...comps].sort((a, b) => (a.slug < b.slug ? -1 : 1));
+  const halfA = sorted.filter((_, i) => i % 2 === 0);
+  const halfB = sorted.filter((_, i) => i % 2 === 1);
+  const predB = halfB.map((p) => predictWith(fitModel(halfA), p, snapshot.as_of));
+  const predA = halfA.map((p) => predictWith(fitModel(halfB), p, snapshot.as_of));
+  const aToB = backtestMetrics(predB, halfB.map((p) => p.mcap_usd!));
+  const bToA = backtestMetrics(predA, halfA.map((p) => p.mcap_usd!));
+  const pooled = backtestMetrics(
+    [...predB, ...predA],
+    [...halfB.map((p) => p.mcap_usd!), ...halfA.map((p) => p.mcap_usd!)],
+  );
+  return { leave_one_out: leaveOneOut, held_out_a_to_b: aToB, held_out_b_to_a: bToA, held_out_pooled: pooled };
 }
 
 // ------------------------------------------------------------------ farm plans
@@ -349,15 +545,52 @@ function farmSteps(p: Protocol): string[] {
   ];
 }
 
-function thesis(p: Protocol, implied: number, multiple: number, factors: Factors): string {
-  const age = p.listed_at === null ? 'an unknown listing date' : `${(daysSince(p.listed_at, '2026-11-14') / 365.25).toFixed(1)} years tracked`;
+/**
+ * The farm's costed verdict. The plan runs about ten transactions over 8
+ * to 12 weeks, so the gas spent is the chain's per-transaction gas times
+ * ten; the deposits are shown apart — they come back when the position
+ * closes, the gas does not. The farm score is the implied value times the
+ * token odds per dollar of gas spent: the expected value a dollar of gas
+ * buys. The verdict follows the score on the radar's own cutoffs.
+ */
+function farmEconomics(p: Protocol, implied: number, odds: number): {
+  gas_usd: number;
+  deposit_usd: number;
+  weeks: string;
+  score: number;
+  verdict: string;
+} {
+  const chain = p.chains[0] ?? 'Ethereum';
+  const gas = Math.round(gasUsd(chain) * FARM_TX_COUNT * 100) / 100;
+  const amt = amounts(p.tvl_usd);
+  const score = Math.round((implied * odds) / gas);
+  const verdict =
+    score >= VERDICT_CUTS.first ? 'Farm first' : score >= VERDICT_CUTS.farm ? 'Farm' : score >= VERDICT_CUTS.small ? 'Farm small' : 'Watch';
+  return { gas_usd: gas, deposit_usd: amt.first + amt.second, weeks: '8–12', score, verdict };
+}
+
+function thesis(
+  p: Protocol,
+  implied: number,
+  multiple: number,
+  factors: Factors,
+  odds: number,
+  verdict: string,
+  asOf: string,
+): string {
+  const age =
+    p.listed_at === null
+      ? 'an unknown listing date'
+      : `${(daysSince(p.listed_at, asOf) / 365.25).toFixed(1)} years tracked`;
   const growth =
     p.change_7d === null ? '7-day growth unreported' : `${p.change_7d >= 0 ? '+' : ''}${p.change_7d.toFixed(1)}% in 7 days`;
   return (
     `${p.name} records no token and holds ${money(p.tvl_usd)} of TVL across ${p.chains.length} ` +
     `chain${p.chains.length === 1 ? '' : 's'}, ${growth}, ${age}. At its category’s ${multiple.toFixed(2)}x ` +
-    `market-cap/TVL multiple, with growth ${factors.growth.toFixed(2)}x and age ${factors.age.toFixed(2)}x, ` +
-    `the radar puts a launch at ${money(implied)}.`
+    `market-cap/TVL multiple, with growth ${factors.growth.toFixed(2)}x, age ${factors.age.toFixed(2)}x and ` +
+    `size ${factors.size.toFixed(2)}x, the radar puts a launch at ${money(implied)}. ` +
+    `Protocols in its category have recorded a token ${Math.round(odds * 100)}% of the time, ` +
+    `so the farm verdict is ${verdict}.`
   );
 }
 
@@ -379,6 +612,13 @@ interface BoardRow {
   growth_factor: number;
   age_factor: number;
   chain_factor: number;
+  size_factor: number;
+  token_odds: number;
+  farm_gas_usd: number;
+  farm_deposit_usd: number;
+  farm_weeks: string;
+  farm_score: number;
+  farm_verdict: string;
   watchlist: boolean;
   thesis: string;
 }
@@ -386,11 +626,21 @@ interface BoardRow {
 function buildRadar(snapshot: Snapshot): {
   board: BoardRow[];
   excluded: { slug: string; name: string; category: string | null; tvl_usd: number; reason: string }[];
-  launched: { slug: string; name: string; category: string | null; tvl_usd: number; mcap_usd: number; ratio: number }[];
+  launched: {
+    slug: string;
+    name: string;
+    category: string | null;
+    tvl_usd: number;
+    mcap_usd: number | null;
+    ratio: number | null;
+  }[];
+  model: FittedModel;
+  odds: { byCategory: Map<string, number>; global: number };
 } {
   const watchlist = new Set(snapshot.watchlist);
-  const multiples = categoryMultiples(snapshot);
-  const scored: { p: Protocol; value: number; factors: Factors; multiple: number }[] = [];
+  const model = fitModel(launchedComps(snapshot));
+  const odds = tokenOdds(snapshot);
+  const scored: { p: Protocol; value: number; factors: Factors; multiple: number; odd: number }[] = [];
   const excluded: { slug: string; name: string; category: string | null; tvl_usd: number; reason: string }[] = [];
   for (const p of snapshot.protocols) {
     if (!recordsNoToken(p)) continue;
@@ -399,9 +649,9 @@ function buildRadar(snapshot: Snapshot): {
       excluded.push({ slug: p.slug, name: p.name, category: p.category, tvl_usd: p.tvl_usd, reason });
       continue;
     }
-    const multiple = multipleFor(p, multiples);
-    const { value, factors } = impliedValue(p, multiple, snapshot.as_of);
-    scored.push({ p, value, factors, multiple });
+    const multiple = multipleFor(p, model);
+    const { value, factors } = impliedValue(p, multiple, model, snapshot.as_of);
+    scored.push({ p, value, factors, multiple, odd: oddsFor(p, odds) });
   }
   // Highest implied value first; ties break by TVL, then slug, so the order is total.
   scored.sort((a, b) => b.value - a.value || b.p.tvl_usd - a.p.tvl_usd || (a.p.slug < b.p.slug ? -1 : 1));
@@ -411,6 +661,7 @@ function buildRadar(snapshot: Snapshot): {
     // Keep implied values strictly decreasing down the ranks.
     const value = Math.min(s.value, previous - 1);
     previous = value;
+    const econ = farmEconomics(s.p, value, s.odd);
     const ageYears = s.p.listed_at === null ? null : daysSince(s.p.listed_at, snapshot.as_of) / 365.25;
     board.push({
       slug: s.p.slug,
@@ -428,24 +679,36 @@ function buildRadar(snapshot: Snapshot): {
       growth_factor: Math.round(s.factors.growth * 1000) / 1000,
       age_factor: Math.round(s.factors.age * 1000) / 1000,
       chain_factor: Math.round(s.factors.chains * 1000) / 1000,
+      size_factor: Math.round(s.factors.size * 1000) / 1000,
+      token_odds: Math.round(s.odd * 1000) / 1000,
+      farm_gas_usd: econ.gas_usd,
+      farm_deposit_usd: econ.deposit_usd,
+      farm_weeks: econ.weeks,
+      farm_score: econ.score,
+      farm_verdict: econ.verdict,
       watchlist: watchlist.has(s.p.slug),
-      thesis: thesis(s.p, value, s.multiple, s.factors),
+      thesis: thesis(s.p, value, s.multiple, s.factors, s.odd, econ.verdict, snapshot.as_of),
     });
   }
   excluded.sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : 1));
+  // Every launched protocol, not just the largest: the three lists together
+  // account for all 758 protocols in the snapshot.
   const launched = snapshot.protocols
-    .filter((p) => !recordsNoToken(p) && p.mcap_usd !== null && p.tvl_usd > 0)
+    .filter((p) => !recordsNoToken(p))
     .map((p) => ({
       slug: p.slug,
       name: p.name,
       category: p.category,
       tvl_usd: p.tvl_usd,
-      mcap_usd: p.mcap_usd!,
-      ratio: Math.round((p.mcap_usd! / p.tvl_usd) * 1000) / 1000,
+      mcap_usd: p.mcap_usd,
+      ratio:
+        p.mcap_usd !== null && p.tvl_usd > 0 ? Math.round((p.mcap_usd / p.tvl_usd) * 1000) / 1000 : null,
     }))
-    .sort((a, b) => b.mcap_usd - a.mcap_usd)
-    .slice(0, 60);
-  return { board, excluded, launched };
+    .sort(
+      (a, b) =>
+        (b.mcap_usd ?? -1) - (a.mcap_usd ?? -1) || (a.slug < b.slug ? -1 : 1),
+    );
+  return { board, excluded, launched, model, odds };
 }
 
 /** The first problem with a board, or null when the gate would take it. */
@@ -481,6 +744,8 @@ function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null {
       const trimmed = step.trim();
       if (trimmed.length < 20 || trimmed.length > 600) return `row ${row.slug} has a farm step of ${trimmed.length} characters`;
     }
+    if (!(row.token_odds > 0 && row.token_odds <= 1)) return `row ${row.slug} has bad token odds`;
+    if (!(row.farm_gas_usd > 0) || !(row.farm_score > 0)) return `row ${row.slug} has bad farm economics`;
   }
   return null;
 }
@@ -775,12 +1040,13 @@ if (!existsSync(inputFile)) {
 const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
 const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
-const { board, excluded, launched } = buildRadar(snapshot);
+const { board, excluded, launched, model, odds } = buildRadar(snapshot);
 const issue = boardIssue(board, snapshot);
 if (issue !== null) {
   process.stderr.write(`token radar: the model wrote a board the gate refuses: ${issue}\n`);
   process.exit(1);
 }
+const backtest = runBacktest(snapshot);
 
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
@@ -794,7 +1060,21 @@ const dataPayload = {
     board_rows: board.length,
     set_aside: excluded.length,
     launched_shown: launched.length,
-    model: 'implied = TVL x category multiple x growth x age x chains',
+    global_multiple: Math.round(Math.exp(model.globalLog) * 1000) / 1000,
+    global_launch_rate: Math.round(odds.global * 1000) / 1000,
+    size_ref_tvl_usd: model.refTvl,
+    model:
+      'implied = TVL x category multiple x growth x age x chains x (TVL / ref) ^ -0.1; ' +
+      'multiple = shrinkage-weighted winsorized geometric mean mcap/TVL (weight 5 toward global), ' +
+      'growth = 1 + 0.25 x clamp(change_7d, -50, +100) / 100, age = 1 + 0.10 x min(years, 4), ' +
+      'chains = 1 + 0.02 x min(chains - 1, 5); token odds = shrunk category launch rate (weight 10); ' +
+      'farm score = implied x odds / gas cost',
+    backtest: {
+      leave_one_out: backtest.leave_one_out,
+      held_out_a_to_b: backtest.held_out_a_to_b,
+      held_out_b_to_a: backtest.held_out_b_to_a,
+      held_out_pooled: backtest.held_out_pooled,
+    },
   },
   rows: board,
   excluded,
@@ -842,6 +1122,8 @@ if (gateProblems.length > 0) {
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${excluded.length} set aside, ${launched.length} launched shown for reference)\n` +
     `token radar: top 3: ${board.slice(0, 3).map((r) => `${r.slug} ${money(r.implied_value_usd)}`).join(', ')}\n` +
+    `token radar: backtest leave-one-out n=${backtest.leave_one_out.n} Spearman ${backtest.leave_one_out.spearman} median error ${backtest.leave_one_out.median_error_x}x within-twofold ${backtest.leave_one_out.within_twofold_pct}%\n` +
+    `token radar: backtest held-out A->B Spearman ${backtest.held_out_a_to_b.spearman} median error ${backtest.held_out_a_to_b.median_error_x}x within-twofold ${backtest.held_out_a_to_b.within_twofold_pct}%; B->A Spearman ${backtest.held_out_b_to_a.spearman} median error ${backtest.held_out_b_to_a.median_error_x}x within-twofold ${backtest.held_out_b_to_a.within_twofold_pct}%\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')}, ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n` +
     `token radar: gate mirror: 7 rows pass\n`,
 );
