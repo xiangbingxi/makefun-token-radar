@@ -9,14 +9,22 @@ A token launch radar: it reads a sealed DefiLlama snapshot, ranks the protocols 
 ## The model
 
 ```
-implied value = TVL × category multiple × growth × age × chains × size
+implied value = TVL × size-curve multiple × growth × age × chains
 ```
 
-- **Category multiple** — the shrinkage-weighted winsorized geometric mean market-cap/TVL of the token-bearing protocols in the same category (weight 5 toward the global mean), clamped to 0.08–1.50. Each log ratio is winsorized to the global mean ± 1.5 standard deviations before averaging, so one wild token cannot set a whole category's multiple on its own, and a thin category borrows the global multiple instead of trusting one comp.
+- **Size-curve multiple** — the market-cap/TVL a protocol this big trades at,
+  from a curve fitted to the launched protocols in the snapshot:
+  log10(market-cap/TVL) = 2.48 − 0.41 × log10(TVL), fitted by least squares on
+  the winsorized log ratios. A $5M protocol prices near 0.55x its TVL, a
+  $13.8B one near 0.02x — the market pays a falling share of TVL as protocols
+  grow. The log ratios are winsorized to their mean ± 1.5 standard deviations
+  before the fit, and the multiple is clamped to 0.01–1.50 as a guard that
+  never binds on this snapshot. A category multiple was tried first and
+  dropped: fitted category multiples rank no better than the size curve and
+  predict worse — the category effect is mostly the size effect in disguise.
 - **Growth** — 1 + a quarter of the 7-day TVL change, clamped to 0.88–1.25.
 - **Age** — 1 + 0.10 per year tracked with no token recorded, up to 1.40.
 - **Chains** — 1 + 0.02 per extra chain, up to 1.10.
-- **Size** — (TVL / $33.4M)^−0.1, tilted to the median launched protocol's TVL: market-cap/TVL falls as TVL grows, so the giants' values are tilted down a little and the small ones up.
 
 Every term is fitted to the snapshot's own launched protocols — the weights are the ones that tested best, not round numbers picked by hand. Nothing is a hardcoded list of names: every number comes from the snapshot itself. A protocol is board-eligible when DefiLlama records no token for it and it is not a wrapped, staked or bridged product of a token that already trades. The watchlist is the floor, never the ceiling — the board ranks every eligible protocol below the $50M floor too.
 
@@ -32,9 +40,9 @@ Each plan is about 10 transactions over 8 to 12 weeks. The total gas cost is the
 
 Computed by the program on every run against the 128 token-bearing protocols in the snapshot that report a positive market cap:
 
-- Leave-one-out (each protocol predicted with a model fitted without it): Spearman ρ = 0.41, median error 4.2×, 26% within twofold of the real cap.
-- Held out twice (the 128 split in two by slug order, each half predicted from a model fitted on the other): 0.41 / 4.6× / 27% and 0.38 / 4.1× / 25%.
-- The plain median multiple scores 0.37 / 5.2× / 20% on the same leave-one-out test.
+- Leave-one-out (each protocol predicted with a curve fitted without it): Spearman ρ = 0.41, median error 3.7×, 30% within twofold of the real cap.
+- Held out twice (the 128 split in two by slug order, each half predicted from a curve fitted on the other): 0.45 / 3.7× / 31% and 0.41 / 3.3× / 28%.
+- The plain median multiple scores 0.37 / 5.2× / 20% on the same leave-one-out test, and the shrinkage-weighted category multiple scores 0.41 / 4.2× / 26%.
 
 ## Coverage
 

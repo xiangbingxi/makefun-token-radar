@@ -15,40 +15,37 @@
 // to a hand-kept list of names. For each protocol that records no token and
 // is not a wrapped, staked or bridged product of a token that already trades:
 //
-//   implied = TVL x multiple x growth x age x chains x (TVL / ref) ^ -0.1
+//   implied = TVL x multiple x growth x age x chains
 //
-//   multiple   the category's market-cap/TVL, as a shrinkage-weighted
-//              winsorized geometric mean: the log ratios of the launched
-//              comps in the category are winsorized to the global mean plus
-//              or minus 1.5 standard deviations, averaged, and then pulled
-//              toward the global mean with a weight of 5 — a category with
-//              one comp borrows almost the whole global multiple, a category
-//              with twenty keeps almost all of its own. Clamped to
-//              [0.08, 1.50]. It answers "what do tokens of protocols shaped
-//              like this one trade at, per dollar of TVL?" Ratios are
-//              log-normal in the snapshot, so the work is done in logs.
+//   multiple   the size curve's market-cap/TVL at this protocol's TVL. The
+//              market pays a falling share of TVL as protocols grow: across
+//              the 128 launched protocols that report a positive market cap,
+//              log10(market-cap/TVL) falls 0.41 per decade of TVL, fitted by
+//              least squares on the winsorized log ratios
+//              (log10(market-cap/TVL) = 2.48 - 0.41 x log10(TVL)). A $5M
+//              protocol prices near 0.55x its TVL, a $13.8B one near 0.02x.
+//              The log ratios are winsorized to their mean plus or minus 1.5
+//              standard deviations before the fit, so one token whose market
+//              cap has nothing to do with its protocol's TVL cannot tilt the
+//              whole curve, and the multiple is clamped to [0.01, 1.50] as a
+//              guard that never binds on this snapshot. It answers "what do
+//              tokens of protocols this big trade at, per dollar of TVL?"
 //   growth     1 + 0.25 x clamp(change_7d, -50, +100) / 100: a protocol
 //              growing 20% in a week scores 1.05 and one shrinking 20%
-//              scores 0.95; unknown growth scores 1. The weight is the
-//              fitted one — the full 0.5 weight the first version used
-//              tested worse leave-one-out, and the fitted log-ratio slope
-//              is near zero, so growth moves the value a little, not a lot.
+//              scores 0.95; unknown growth scores 1.
 //   age        1 + 0.10 x min(years since listed_at, 4): a protocol that ran
 //              for years with no token recorded carries more pent-up launch
 //              value than one tracked for a month. Unknown listing date
-//              scores 1. The 0.10 slope is the fitted one: the log-ratio
-//              regression on the launched comps puts age at about +0.05
-//              log10 per year, and the leave-one-out test prefers 0.10
-//              over the first version's 0.15.
+//              scores 1.
 //   chains     1 + 0.02 x min(chains - 1, 5): a protocol live on more chains
 //              has more surface to farm.
-//   size tilt  (TVL / ref) ^ -0.1, where ref is the median TVL of the
-//              launched comps ($33.4M): market-cap/TVL falls as TVL grows,
-//              so the giants' values are tilted down and the small ones up.
-//              The tilt is small — a $10B protocol scores 0.56x on this
-//              term — and it is fitted, not asserted: it improves the
-//              median leave-one-out error from 4.35x to 4.15x at no cost
-//              to the rank correlation.
+//
+// A category multiple was tried first and dropped: fitted category multiples
+// rank no better than the size curve and predict worse — the category effect
+// is mostly the size effect in disguise, since categories differ in how big
+// their protocols are. The curve is the whole pricing model; categories
+// still matter for the token odds and the farm plans, where the peers'
+// record is the evidence.
 //
 // Token odds: the chance a protocol like this one ever records a token, from
 // the peers' record — the share of protocols in its category that already
@@ -69,12 +66,13 @@
 // Backtest, run by this program on every run and printed on the page: the
 // model is fitted and tested against the 128 launched protocols in this
 // snapshot that report a positive market cap. Leave-one-out (each protocol
-// predicted with a model fitted without it): Spearman 0.41, median error
-// 4.2x, 26% within twofold of the real cap. Held out twice (the comps split
-// in two by slug order, each half predicted from a model fitted on the
-// other): 0.41 / 4.6x / 27% and 0.38 / 4.1x / 25%. The plain median
-// multiple the first version replaced scores 0.37 / 5.2x / 20% on the same
-// leave-one-out test.
+// predicted with a curve fitted without it): Spearman 0.41, median error
+// 3.7x, 30% within twofold of the real cap. Held out twice (the comps split
+// in two by slug order, each half predicted from a curve fitted on the
+// other): 0.45 / 3.7x / 31% and 0.41 / 3.3x / 28%. The plain median
+// multiple the first version used scores 0.37 / 5.2x / 20% on the same
+// leave-one-out test, and the shrinkage-weighted category multiple it
+// replaced scores 0.41 / 4.2x / 26%.
 //
 // A board row's farm plan is generated from the protocol's own category,
 // primary chain and TVL tier, with concrete amounts, gas costs and weeks —
@@ -119,15 +117,14 @@ const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const JPEG_MAGIC = [0xff, 0xd8, 0xff];
 
 // Fitted model constants (see the header comment for where each came from).
-const SHRINK_WEIGHT = 5; // category multiple pulled toward the global mean
-const WINSOR_SD = 1.5; // log ratios winsorized to global mean +/- this many sd
-const MULTIPLE_CLAMP: [number, number] = [0.08, 1.5];
+const WINSOR_SD = 1.5; // log ratios winsorized to their mean +/- this many sd
+const CURVE_RIDGE = 1; // ridge on the curve's slope, for stability
+const MULTIPLE_CLAMP: [number, number] = [0.01, 1.5];
 const GROWTH_WEIGHT = 0.25;
 const AGE_WEIGHT = 0.1;
 const AGE_CAP_YEARS = 4;
 const CHAIN_WEIGHT = 0.02;
 const CHAIN_CAP = 5;
-const SIZE_TILT = -0.1; // exponent on (TVL / ref)
 const ODDS_SHRINK_WEIGHT = 10; // token odds pulled toward the global launch rate
 const FARM_TX_COUNT = 10; // transactions in a farm plan, over 8 to 12 weeks
 const VERDICT_CUTS = { first: 10_000_000, farm: 1_000_000, small: 100_000 };
@@ -195,11 +192,6 @@ function mean(xs: number[]): number {
   return xs.reduce((sum, x) => sum + x, 0) / xs.length;
 }
 
-function median(xs: number[]): number {
-  const sorted = [...xs].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)]!;
-}
-
 // ------------------------------------------------------------------ eligibility
 
 /** Categories the watchlist rule treats as a wrapped, staked or bridged product. */
@@ -237,7 +229,6 @@ interface Factors {
   growth: number;
   age: number;
   chains: number;
-  size: number;
 }
 
 function growthFactor(change7d: number | null): number {
@@ -255,10 +246,6 @@ function chainFactor(chains: string[]): number {
   return 1 + CHAIN_WEIGHT * Math.min(Math.max(chains.length - 1, 0), CHAIN_CAP);
 }
 
-function sizeFactor(tvl: number, ref: number): number {
-  return (tvl / ref) ** SIZE_TILT;
-}
-
 /** The launched protocols a multiple can be fitted on: a token recorded, a positive cap, a positive TVL. */
 function launchedComps(snapshot: Snapshot): Protocol[] {
   return snapshot.protocols.filter(
@@ -266,65 +253,57 @@ function launchedComps(snapshot: Snapshot): Protocol[] {
   );
 }
 
-interface FittedModel {
-  globalLog: number;
-  catMean: Map<string, number>;
-  catCount: Map<string, number>;
-  refTvl: number;
+interface CurveFit {
+  intercept: number;
+  slope: number;
 }
 
 /**
- * Fit the category multiples on a set of launched comps: the global log
- * market-cap/TVL (winsorized) and, per category, the winsorized mean log
- * ratio and how many comps it rests on. A category's multiple is then the
- * shrinkage-weighted blend of its own mean and the global mean, so a thin
- * category borrows the global multiple instead of trusting one comp.
+ * Fit the size curve on a set of launched comps: least squares of
+ * log10(market-cap/TVL) on log10(TVL), with the log ratios winsorized to
+ * their mean plus or minus 1.5 standard deviations first, so one wild token
+ * cannot tilt the curve, and a ridge of 1 on the slope for stability. The
+ * curve is the pricing model: a protocol's multiple is the curve's value at
+ * its own TVL.
  */
-function fitModel(train: Protocol[]): FittedModel {
-  const logs = train.map((p) => Math.log(p.mcap_usd! / p.tvl_usd));
-  const globalMean = mean(logs);
-  const spread = Math.sqrt(logs.reduce((sum, x) => sum + (x - globalMean) ** 2, 0) / logs.length);
-  const winsorize = (x: number): number => clamp(x, globalMean - WINSOR_SD * spread, globalMean + WINSOR_SD * spread);
-  const globalLog = mean(logs.map(winsorize));
-  const byCategory = new Map<string, number[]>();
-  for (const p of train) {
-    const key = p.category ?? '(none)';
-    const list = byCategory.get(key) ?? [];
-    list.push(Math.log(p.mcap_usd! / p.tvl_usd));
-    byCategory.set(key, list);
+function fitCurve(train: Protocol[]): CurveFit {
+  const xs = train.map((p) => Math.log10(p.tvl_usd));
+  const rawYs = train.map((p) => Math.log10(p.mcap_usd! / p.tvl_usd));
+  const yMean = mean(rawYs);
+  const ySpread = Math.sqrt(rawYs.reduce((sum, y) => sum + (y - yMean) ** 2, 0) / rawYs.length);
+  const ys = rawYs.map((y) => clamp(y, yMean - WINSOR_SD * ySpread, yMean + WINSOR_SD * ySpread));
+  const n = train.length;
+  let sx = 0;
+  let sy = 0;
+  let sxx = 0;
+  let sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sx += xs[i]!;
+    sy += ys[i]!;
+    sxx += xs[i]! * xs[i]!;
+    sxy += xs[i]! * ys[i]!;
   }
-  const catMean = new Map<string, number>();
-  const catCount = new Map<string, number>();
-  for (const [cat, catLogs] of byCategory) {
-    catMean.set(cat, mean(catLogs.map(winsorize)));
-    catCount.set(cat, catLogs.length);
-  }
-  return { globalLog, catMean, catCount, refTvl: median(train.map((p) => p.tvl_usd)) };
+  const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx + CURVE_RIDGE);
+  const intercept = (sy - slope * sx) / n;
+  return { intercept, slope };
 }
 
-function multipleFor(p: Protocol, model: FittedModel): number {
-  const key = p.category ?? '(none)';
-  const n = model.catCount.get(key) ?? 0;
-  const own = model.catMean.get(key) ?? model.globalLog;
-  const logMultiple = (n * own + SHRINK_WEIGHT * model.globalLog) / (n + SHRINK_WEIGHT);
-  return clamp(Math.exp(logMultiple), MULTIPLE_CLAMP[0], MULTIPLE_CLAMP[1]);
+function curveMultiple(p: Protocol, fit: CurveFit): number {
+  const logMultiple = fit.intercept + fit.slope * Math.log10(p.tvl_usd);
+  return clamp(10 ** logMultiple, MULTIPLE_CLAMP[0], MULTIPLE_CLAMP[1]);
 }
 
 function impliedValue(
   p: Protocol,
   multiple: number,
-  model: FittedModel,
   asOf: string,
 ): { value: number; factors: Factors } {
   const factors: Factors = {
     growth: growthFactor(p.change_7d),
     age: ageFactor(p.listed_at, asOf),
     chains: chainFactor(p.chains),
-    size: sizeFactor(p.tvl_usd, model.refTvl),
   };
-  const value = Math.round(
-    p.tvl_usd * multiple * factors.growth * factors.age * factors.chains * factors.size,
-  );
+  const value = Math.round(p.tvl_usd * multiple * factors.growth * factors.age * factors.chains);
   return { value, factors };
 }
 
@@ -413,9 +392,9 @@ function backtestMetrics(predicted: number[], actual: number[]): BacktestMetrics
   };
 }
 
-function predictWith(model: FittedModel, p: Protocol, asOf: string): number {
-  const multiple = multipleFor(p, model);
-  return impliedValue(p, multiple, model, asOf).value;
+function predictWith(fit: CurveFit, p: Protocol, asOf: string): number {
+  const multiple = curveMultiple(p, fit);
+  return impliedValue(p, multiple, asOf).value;
 }
 
 interface Backtest {
@@ -435,14 +414,14 @@ function runBacktest(snapshot: Snapshot): Backtest {
   const looPredicted: number[] = [];
   for (let i = 0; i < comps.length; i++) {
     const train = comps.filter((_, j) => j !== i);
-    looPredicted.push(predictWith(fitModel(train), comps[i]!, snapshot.as_of));
+    looPredicted.push(predictWith(fitCurve(train), comps[i]!, snapshot.as_of));
   }
   const leaveOneOut = backtestMetrics(looPredicted, comps.map((p) => p.mcap_usd!));
   const sorted = [...comps].sort((a, b) => (a.slug < b.slug ? -1 : 1));
   const halfA = sorted.filter((_, i) => i % 2 === 0);
   const halfB = sorted.filter((_, i) => i % 2 === 1);
-  const predB = halfB.map((p) => predictWith(fitModel(halfA), p, snapshot.as_of));
-  const predA = halfA.map((p) => predictWith(fitModel(halfB), p, snapshot.as_of));
+  const predB = halfB.map((p) => predictWith(fitCurve(halfA), p, snapshot.as_of));
+  const predA = halfA.map((p) => predictWith(fitCurve(halfB), p, snapshot.as_of));
   const aToB = backtestMetrics(predB, halfB.map((p) => p.mcap_usd!));
   const bToA = backtestMetrics(predA, halfA.map((p) => p.mcap_usd!));
   const pooled = backtestMetrics(
@@ -586,9 +565,9 @@ function thesis(
     p.change_7d === null ? '7-day growth unreported' : `${p.change_7d >= 0 ? '+' : ''}${p.change_7d.toFixed(1)}% in 7 days`;
   return (
     `${p.name} records no token and holds ${money(p.tvl_usd)} of TVL across ${p.chains.length} ` +
-    `chain${p.chains.length === 1 ? '' : 's'}, ${growth}, ${age}. At its category’s ${multiple.toFixed(2)}x ` +
-    `market-cap/TVL multiple, with growth ${factors.growth.toFixed(2)}x, age ${factors.age.toFixed(2)}x and ` +
-    `size ${factors.size.toFixed(2)}x, the radar puts a launch at ${money(implied)}. ` +
+    `chain${p.chains.length === 1 ? '' : 's'}, ${growth}, ${age}. At the fitted size curve’s ${multiple.toFixed(2)}x ` +
+    `market-cap/TVL multiple for a protocol this big, with growth ${factors.growth.toFixed(2)}x and ` +
+    `age ${factors.age.toFixed(2)}x, the radar puts a launch at ${money(implied)}. ` +
     `Protocols in its category have recorded a token ${Math.round(odds * 100)}% of the time, ` +
     `so the farm verdict is ${verdict}.`
   );
@@ -612,7 +591,6 @@ interface BoardRow {
   growth_factor: number;
   age_factor: number;
   chain_factor: number;
-  size_factor: number;
   token_odds: number;
   farm_gas_usd: number;
   farm_deposit_usd: number;
@@ -634,11 +612,11 @@ function buildRadar(snapshot: Snapshot): {
     mcap_usd: number | null;
     ratio: number | null;
   }[];
-  model: FittedModel;
+  curve: CurveFit;
   odds: { byCategory: Map<string, number>; global: number };
 } {
   const watchlist = new Set(snapshot.watchlist);
-  const model = fitModel(launchedComps(snapshot));
+  const curve = fitCurve(launchedComps(snapshot));
   const odds = tokenOdds(snapshot);
   const scored: { p: Protocol; value: number; factors: Factors; multiple: number; odd: number }[] = [];
   const excluded: { slug: string; name: string; category: string | null; tvl_usd: number; reason: string }[] = [];
@@ -649,8 +627,8 @@ function buildRadar(snapshot: Snapshot): {
       excluded.push({ slug: p.slug, name: p.name, category: p.category, tvl_usd: p.tvl_usd, reason });
       continue;
     }
-    const multiple = multipleFor(p, model);
-    const { value, factors } = impliedValue(p, multiple, model, snapshot.as_of);
+    const multiple = curveMultiple(p, curve);
+    const { value, factors } = impliedValue(p, multiple, snapshot.as_of);
     scored.push({ p, value, factors, multiple, odd: oddsFor(p, odds) });
   }
   // Highest implied value first; ties break by TVL, then slug, so the order is total.
@@ -679,7 +657,6 @@ function buildRadar(snapshot: Snapshot): {
       growth_factor: Math.round(s.factors.growth * 1000) / 1000,
       age_factor: Math.round(s.factors.age * 1000) / 1000,
       chain_factor: Math.round(s.factors.chains * 1000) / 1000,
-      size_factor: Math.round(s.factors.size * 1000) / 1000,
       token_odds: Math.round(s.odd * 1000) / 1000,
       farm_gas_usd: econ.gas_usd,
       farm_deposit_usd: econ.deposit_usd,
@@ -708,7 +685,7 @@ function buildRadar(snapshot: Snapshot): {
       (a, b) =>
         (b.mcap_usd ?? -1) - (a.mcap_usd ?? -1) || (a.slug < b.slug ? -1 : 1),
     );
-  return { board, excluded, launched, model, odds };
+  return { board, excluded, launched, curve, odds };
 }
 
 /** The first problem with a board, or null when the gate would take it. */
@@ -1040,7 +1017,7 @@ if (!existsSync(inputFile)) {
 const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
 const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
-const { board, excluded, launched, model, odds } = buildRadar(snapshot);
+const { board, excluded, launched, curve, odds } = buildRadar(snapshot);
 const issue = boardIssue(board, snapshot);
 if (issue !== null) {
   process.stderr.write(`token radar: the model wrote a board the gate refuses: ${issue}\n`);
@@ -1060,12 +1037,13 @@ const dataPayload = {
     board_rows: board.length,
     set_aside: excluded.length,
     launched_shown: launched.length,
-    global_multiple: Math.round(Math.exp(model.globalLog) * 1000) / 1000,
     global_launch_rate: Math.round(odds.global * 1000) / 1000,
-    size_ref_tvl_usd: model.refTvl,
+    curve_intercept: Math.round(curve.intercept * 1000) / 1000,
+    curve_slope: Math.round(curve.slope * 1000) / 1000,
     model:
-      'implied = TVL x category multiple x growth x age x chains x (TVL / ref) ^ -0.1; ' +
-      'multiple = shrinkage-weighted winsorized geometric mean mcap/TVL (weight 5 toward global), ' +
+      'implied = TVL x size-curve multiple x growth x age x chains; ' +
+      'multiple = 10 ^ (curve intercept + curve slope x log10(TVL)), fitted by least squares ' +
+      'on the winsorized log10(mcap/TVL) of the launched comps, clamped to [0.01, 1.50]; ' +
       'growth = 1 + 0.25 x clamp(change_7d, -50, +100) / 100, age = 1 + 0.10 x min(years, 4), ' +
       'chains = 1 + 0.02 x min(chains - 1, 5); token odds = shrunk category launch rate (weight 10); ' +
       'farm score = implied x odds / gas cost',

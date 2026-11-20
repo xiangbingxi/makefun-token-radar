@@ -8,24 +8,24 @@
  * snapshot: 198 ranked, 144 set aside, 416 launched.
  *
  * The value model, stated here so a reader can check it against the numbers
- * on the page: implied = TVL x category multiple x growth x age x chains x
- * size. The multiple is the shrinkage-weighted winsorized geometric mean
- * market-cap/TVL of the token-bearing protocols in the same category (weight
- * 5 toward the global mean), clamped to 0.08-1.50. Growth is 1 + a quarter of
- * the 7-day TVL change. Age is 1 + 0.10 per year tracked with no token
- * recorded, up to 1.40. Chains add 0.02 per extra chain, up to 1.10. Size is
- * (TVL / $33.4M)^-0.1, tilted to the median launched protocol's TVL. Every
- * factor is stored on the row, so the detail view can show the arithmetic
- * instead of asserting it. Token odds are the shrunk share of the row's
- * category that already records a token (weight 10 toward the snapshot-wide
- * 54.9%). The farm score is implied value x token odds per dollar of gas
- * spent (about 10 transactions over 8 to 12 weeks); the verdict follows the
- * score: 10M and up Farm first, 1M and up Farm, 100K and up Farm small, below
- * that Watch. The backtest numbers in the strip above the board are computed
- * by main.ts on every run: leave-one-out over the 128 launched protocols
- * that report a positive market cap (Spearman 0.41, median error 4.2x, 26%
- * within twofold), and held out twice (0.41 / 4.6x / 27% and 0.38 / 4.1x /
- * 25%), against 0.37 / 5.2x / 20% for the plain median multiple.
+ * on the page: implied = TVL x size-curve multiple x growth x age x chains.
+ * The multiple is the fitted size curve's market-cap/TVL at the protocol's
+ * own TVL: log10(market-cap/TVL) = 2.48 - 0.41 x log10(TVL), fitted by least
+ * squares on the winsorized log ratios of the launched protocols, clamped to
+ * 0.01-1.50. Growth is 1 + a quarter of the 7-day TVL change. Age is 1 + 0.10
+ * per year tracked with no token recorded, up to 1.40. Chains add 0.02 per
+ * extra chain, up to 1.10. Every factor is stored on the row, so the detail
+ * view can show the arithmetic instead of asserting it. Token odds are the
+ * shrunk share of the row's category that already records a token (weight 10
+ * toward the snapshot-wide 54.9%). The farm score is implied value x token
+ * odds per dollar of gas spent (about 10 transactions over 8 to 12 weeks);
+ * the verdict follows the score: 10M and up Farm first, 1M and up Farm, 100K
+ * and up Farm small, below that Watch. The backtest numbers in the strip
+ * above the board are computed by main.ts on every run: leave-one-out over
+ * the 128 launched protocols that report a positive market cap (Spearman
+ * 0.41, median error 3.7x, 30% within twofold), and held out twice (0.45 /
+ * 3.7x / 31% and 0.41 / 3.3x / 28%), against 0.37 / 5.2x / 20% for the plain
+ * median multiple and 0.41 / 4.2x / 26% for the category multiple it replaced.
  *
  * Deep links: #/detail/<slug> opens a protocol, #/filter/chain/<chain> and
  * #/filter/category/<category> open the board pre-filtered, #/tab/<board |
@@ -251,8 +251,7 @@
       '<span class="pill">multiple <b>' + r.multiple.toFixed(2) + 'x</b></span><span class="eq">×</span>' +
       '<span class="pill">growth <b>' + r.growth_factor.toFixed(2) + 'x</b></span><span class="eq">×</span>' +
       '<span class="pill">age <b>' + r.age_factor.toFixed(2) + 'x</b></span><span class="eq">×</span>' +
-      '<span class="pill">chains <b>' + r.chain_factor.toFixed(2) + 'x</b></span><span class="eq">×</span>' +
-      '<span class="pill">size <b>' + r.size_factor.toFixed(2) + 'x</b></span><span class="eq">=</span>' +
+      '<span class="pill">chains <b>' + r.chain_factor.toFixed(2) + 'x</b></span><span class="eq">=</span>' +
       '<span class="pill">implied <b>' + money(r.implied_value_usd) + '</b></span>' +
       '</div>' +
       '<h3>Token odds — from the peers’ record</h3>' +

@@ -71,19 +71,22 @@
 
 <section class="method" id="method">
   <h2>How the radar works</h2>
-  <p><strong>Implied value = TVL × category multiple × growth × age × chains × size.</strong>
-  The multiple is the category’s market-cap/TVL, fitted from the launched protocols in the
-  snapshot: each log ratio is winsorized to the global mean plus or minus 1.5 standard
-  deviations, averaged, then pulled toward the global mean with a weight of 5 — a category
-  with one comp borrows almost the whole global multiple, a category with twenty keeps
-  almost all of its own. The multiple is clamped to 0.08–1.50. Growth is 1 + a quarter of
-  the 7-day TVL change, clamped to 0.88–1.25. Age is 1 + 0.10 per year tracked with no token
-  recorded, up to 1.40. Chains add 0.02 per extra chain, up to 1.10. Size is
-  (TVL / $33.4M)^−0.1, tilted to the median launched protocol’s TVL: market-cap/TVL falls
-  as TVL grows, so the giants’ values are tilted down a little and the small ones up. Every
-  term is fitted to the snapshot’s own launched protocols — the weights are the ones that
-  tested best, not round numbers picked by hand — and nothing here is a hardcoded list of
-  names: the board re-ranks from scratch on every run.</p>
+  <p><strong>Implied value = TVL × size-curve multiple × growth × age × chains.</strong>
+  The multiple comes from a curve fitted to the launched protocols in the snapshot:
+  log10(market-cap/TVL) falls 0.41 per decade of TVL, fitted by least squares on the
+  winsorized log ratios (log10(market-cap/TVL) = 2.48 − 0.41 × log10(TVL)). A $5M
+  protocol prices near 0.55x its TVL, a $13.8B one near 0.02x — the market pays a
+  falling share of TVL as protocols grow, so the giants’ values are compressed and the
+  small ones lifted. The log ratios are winsorized to their mean plus or minus 1.5
+  standard deviations before the fit, so one token whose market cap has nothing to do
+  with its protocol’s TVL cannot tilt the whole curve, and the multiple is clamped to
+  0.01–1.50 as a guard that never binds on this snapshot. Growth is 1 + a quarter of
+  the 7-day TVL change, clamped to 0.88–1.25. Age is 1 + 0.10 per year tracked with no
+  token recorded, up to 1.40. Chains add 0.02 per extra chain, up to 1.10. A category
+  multiple was tried first and dropped: fitted category multiples rank no better than
+  the size curve and predict worse — the category effect is mostly the size effect in
+  disguise, since categories differ in how big their protocols are. Nothing here is a
+  hardcoded list of names: the board re-ranks from scratch on every run.</p>
   <p><strong>Token odds.</strong> Each row carries the chance a protocol like it ever records
   a token, from the peers’ record: the share of protocols in its category that already
   record one, shrunk toward the snapshot-wide 54.9% with a weight of 10, so a category of
@@ -92,12 +95,13 @@
   <p><strong>Checked, not asserted.</strong> The radar was backtested against the 128
   token-bearing protocols in this snapshot that report a positive market cap, and the
   numbers on this page are computed by the program on every run, not typed in. Leave-one-out
-  (each protocol predicted with a model fitted without it): the predictions rank the real
-  market caps with Spearman ρ = 0.41, the median prediction is off by 4.2×, and 26% land
+  (each protocol predicted with a curve fitted without it): the predictions rank the real
+  market caps with Spearman ρ = 0.41, the median prediction is off by 3.7×, and 30% land
   within twofold of the real cap. Held out twice (the 128 split in two by slug order, each
-  half predicted from a model fitted on the other): ρ = 0.41, 4.6×, 27% one way and
-  ρ = 0.38, 4.1×, 25% the other. The plain median multiple this replaces scores 0.37,
-  5.2× and 20% on the same leave-one-out test.</p>
+  half predicted from a curve fitted on the other): ρ = 0.45, 3.7×, 31% one way and
+  ρ = 0.41, 3.3×, 28% the other. The plain median multiple the first version used scores
+  0.37, 5.2× and 20% on the same leave-one-out test, and the shrinkage-weighted category
+  multiple it replaced scores 0.41, 4.2× and 26%.</p>
   <p><strong>Farm plans, costed.</strong> Each plan is about 10 transactions across 8 to 12
   weeks, so the total gas cost is the chain’s per-transaction gas times 10, and the deposits
   are shown apart — they come back when the position closes, the gas does not. The farm
